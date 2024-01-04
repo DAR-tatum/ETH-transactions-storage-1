@@ -89,8 +89,9 @@ while web3.eth.syncing != False:
 
 logger.info("Ethereum node is synced.")
 
-# Adds all transactions from Ethereum block
-def insertTxsFromBlock(block):
+# Aggregates all transactions from Ethereum block
+def getTxsFromBlock(block):
+    transactions = []
     blockid = block['number']
     time = block['timestamp']
     for txNumber in range(0, len(block.transactions)):
@@ -120,9 +121,11 @@ def insertTxsFromBlock(block):
             logger.info('Skipping ' + str(txhash) + ' tx. Incorrect contract_to length: ' + str(len(contract_to)))
             contract_to = ''
             contract_value = ''
-        cur.execute(
-            'INSERT INTO public.ethtxs(time, txfrom, txto, value, gas, gasprice, block, txhash, contract_to, contract_value) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)',
-            (time, fr, to, value, gas, gasprice, blockid, txhash, contract_to, contract_value))
+       
+        transactions.append((time, fr, to, value, gas, gasprice, blockid, txhash, contract_to, contract_value))
+           
+    return transactions
+
 
 # Fetch all of new (not in index) Ethereum blocks and add transactions to index
 while True:
@@ -147,7 +150,13 @@ while True:
     for blockHeight in range(maxblockindb + 1, endblock):
         block = web3.eth.get_block(blockHeight, True)
         if len(block.transactions) > 0:
-            insertTxsFromBlock(block)
+            transactions = getTxsFromBlock(block)
+            
+            # Try batch insert
+            cur.execute(
+            'INSERT INTO public.ethtxs(time, txfrom, txto, value, gas, gasprice, block, txhash, contract_to, contract_value) VALUES %s',
+            (tuple(transactions),))
+
             logger.info('Block ' + str(blockHeight) + ' with ' + str(len(block.transactions)) + ' transactions is processed')
         else:
             logger.info('Block ' + str(blockHeight) + ' does not contain transactions')
