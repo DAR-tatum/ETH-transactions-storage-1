@@ -12,23 +12,16 @@
 from os import environ
 from web3 import Web3
 from web3.middleware import geth_poa_middleware
-import psycopg2
 import time
-import sys
 import logging
-#from systemd.journal import JournalHandler
+from google.cloud import bigquery
 
 # Get env variables or set to default
-dbname = environ.get("DB_NAME")
 startBlock = environ.get("START_BLOCK") or "1"
 confirmationBlocks = environ.get("CONFIRMATIONS_BLOCK") or "0"
-nodeUrl = environ.get("ETH_URL")
+nodeUrl = environ.get("ETH_URL") or "http://127.0.0.1:8545"
 pollingPeriod = environ.get("PERIOD") or "20"
 logFile = environ.get("LOG_FILE")
-
-if dbname == None:
-    print('Add postgre database in env var DB_NAME')
-    exit(2)
 
 if nodeUrl == None:
     print('Add eth url in env var ETH_URL')
@@ -45,7 +38,6 @@ else:
 web3.middleware_onion.inject(geth_poa_middleware, layer=0)
 
 # Start logger
-#logger = logging.getLogger("EthIndexerLog")
 logger = logging.getLogger("eth-sync")
 logger.setLevel(logging.INFO)
 
@@ -58,28 +50,12 @@ formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
 lfh.setFormatter(formatter)
 logger.addHandler(lfh)
 
-# Systemd logger, if we want to user journalctl logs
-# Install systemd-python and
-# decomment "#from systemd.journal import JournalHandler" up
-#ljc = JournalHandler()
-#formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
-#ljc.setFormatter(formatter)
-#logger.addHandler(ljc)
+client = bigquery.Client()
 
-try:
-    logger.info("Trying to connect to " + dbname + " database…")
-    conn = psycopg2.connect(database=dbname)
-    conn.autocommit = True
-    logger.info("Connected to the database")
-except:
-    logger.error("Unable to connect to database")
-    exit(1)
 
 # Delete last block as it may be not imported in full
-cur = conn.cursor()
-cur.execute('DELETE FROM public.ethtxs WHERE block = (SELECT Max(block) from public.ethtxs)')
-cur.close()
-conn.close()
+client.query("DELETE FROM `dar-dev-02.blockchain_ethereum.index` WHERE block = (SELECT Max(block) from `dar-dev-02.blockchain_ethereum.index`)")
+
 
 # Wait for the node to be in sync before indexing
 while web3.eth.syncing != False:
@@ -97,8 +73,6 @@ def insertTxsFromBlock(block):
     for txNumber in range(0, len(block.transactions)):
         trans = block.transactions[txNumber]
         transReceipt = web3.eth.get_transaction_receipt(trans['hash'])
-        # Save also transaction status, should be null if pre byzantium blocks
-        # status = bool(transReceipt['status'])
         txhash = trans['hash'].hex()
         value = trans['value']
         inputinfo = trans['input']
@@ -121,22 +95,16 @@ def insertTxsFromBlock(block):
             logger.info('Skipping ' + str(txhash) + ' tx. Incorrect contract_to length: ' + str(len(contract_to)))
             contract_to = ''
             contract_value = ''
-        cur.execute(
-            'INSERT INTO public.ethtxs(time, txfrom, txto, value, gas, gasprice, block, txhash, contract_to, contract_value) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)',
-            (time, fr, to, value, gas, gasprice, blockid, txhash, contract_to, contract_value))
+        
+        client.query(f"INSERT INTO `dar-dev-02.blockchain_ethereum.index`(time, txfrom, txto, value, gas, gasprice, block, txhash, contract_to, contract_value) VALUES ({time}, {fr}, {to}, {value}, {gas}, {gasprice}, {blockid}, {txhash}, {contract_to}, {contract_value})")
+
+
 
 # Fetch all of new (not in index) Ethereum blocks and add transactions to index
 while True:
-    try:
-        conn = psycopg2.connect(database=dbname)
-        conn.autocommit = True
-    except:
-        logger.error("Unable to connect to database")
-
-    cur = conn.cursor()
-
-    cur.execute('SELECT Max(block) from public.ethtxs')
-    maxblockindb = cur.fetchone()[0]
+    results = client.query_and_wait("SELECT MAX(block) from `dar-dev-02.blockchain_ethereum.index`")
+    maxblockindb = list(results)[0][0]
+    
     # On first start, we index transactions from a block number you indicate
     if maxblockindb is None:
         maxblockindb = int(startBlock)
@@ -152,6 +120,5 @@ while True:
             logger.info('Block ' + str(blockHeight) + ' with ' + str(len(block.transactions)) + ' transactions is processed')
         else:
             logger.info('Block ' + str(blockHeight) + ' does not contain transactions')
-    cur.close()
-    conn.close()
+
     time.sleep(int(pollingPeriod))
