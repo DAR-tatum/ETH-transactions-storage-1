@@ -1,16 +1,12 @@
-FROM python:3.6-slim
+FROM python:3.8-slim
 
-RUN apt update -y
-RUN apt install -y build-essential 
-RUN apt install -y git
-RUN pip3 install web3
-RUN pip3 install psycopg2
+WORKDIR /ETH-transactions-storage
+COPY . .
 
-RUN mkdir /eth-storage
+RUN pip install --no-cache-dir -vvv -r requirements.txt
 
-COPY ./ethsync.py /eth-storage
+RUN python3.8 ethtest.py
+RUN python3.8 pgtest.py
 
-ENV DB_NAME=yourDB
 
-WORKDIR /eth-storage
-ENTRYPOINT [ "python3.6", "./ethsync.py" ]
+CMD [ "python3.8", "./ethsync.py" ]

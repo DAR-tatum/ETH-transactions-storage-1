@@ -1,9 +1,10 @@
-import psycopg2
+from google.cloud import bigquery
+
+client = bigquery.Client()
 
 try:
-    print("Trying to connect to 'index' database…")
-    conn = psycopg2.connect(database="index")
-    conn.autocommit = True
-    print("Connected to the 'index' database")
-except:
-    print("Unable to connect to 'index' database")
+  # Attempt a simple operation that requires a connection (e.g., list datasets)
+  datasets = list(client.list_datasets())
+  print("The client is connected.")
+except Exception as e:
+  print(f"An error occurred: {e}")
