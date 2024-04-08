@@ -190,3 +190,104 @@ And compare it to the Ethereum node's best block.
 To test the connection from the script, set a connection line in `ethtest.py`, and run it. In case of success, it will print the current Ethereum's last block.
 
 To test a connection to a Postgres database `index`, run `pgtest.py`.
+
+### Transaction API with Postgrest
+
+[Install and configure](https://postgrest.org/en/stable/install.html) Postgrest.
+Here is an example of running API for user `api_user` connected to `index` database on the 3000 port:
+
+```
+db-uri = "postgres://api_user@/index"
+db-schema = "public"
+db-anon-role = "api_user"
+db-pool = 10
+server-host = "127.0.0.1"
+server-port = 3000
+```
+
+Make sure you add Postgrest in crontab for autostart on reboot:
+
+```
+@reboot cd /usr/share && /usr/bin/postgrest ./postgrest.conf
+```
+  
+### Make Indexer's API public
+
+If you need to provide public API, use any web server like nginx and set a proxy to Postgrest port in config:
+
+```
+location /ethtxs {
+    proxy_pass http://127.0.0.1:3000;
+}
+location /aval {
+    proxy_pass http://127.0.0.1:3000;
+}
+location /max_block {
+    proxy_pass http://127.0.0.1:3000;
+}
+
+```
+
+This way, endpoints will be available:
+
+- `/ethtxs` used to fetch Ethereum transactions by address
+- `/aval` returns the status of service. Endpoint `aval` is a table with `status` field just to check API availability.
+- `/max_block` returns max Ethereum-indexed block
+
+Example:
+
+```
+https://yourdomain.com/max_block
+```
+
+## Dockerized and docker-compose
+
+by Guénolé de Cadoudal (guenoledc@yahoo.fr)
+
+In the `docker-compose.yml`, you find a configuration that shows how this tool can be embedded in a docker configuration with the following processes:
+
+- postgres db: to store the indexed data
+- postgREST tool to expose the data as a REST api (see above comments)
+- GETH node in POA mode. It can be Nethermind or another node, but it has not been tested
+- EthSync tool (this tool)
+
+[Set env variables](#ethereum-transaction-indexer).
+
+# API request examples
+
+Get the last 25 Ethereum transactions without ERC-20 transactions for address 0xFBb1b73C4f0BDa4f67dcA266ce6Ef42f520fBB98:
+
+```
+curl -k -X GET "http://localhost:3000/ethtxs?and=(contract_to.eq.,or(txfrom.eq.0xFBb1b73C4f0BDa4f67dcA266ce6Ef42f520fBB98,txto.eq.0xFBb1b73C4f0BDa4f67dcA266ce6Ef42f520fBB98))&order=time.desc&limit=25"
+
+```
+
+Get the last 25 USDT transactions for address 0xabfDF505fFd5587D9E7707dFB47F45AF1f03E275:
+
+```
+curl -k -X GET "http://localhost:3000/ethtxs?and=(txto.eq.0xdac17f958d2ee523a2206206994597c13d831ec7,or(txfrom.eq.0xabfDF505fFd5587D9E7707dFB47F45AF1f03E275,contract_to.eq.000000000000000000000000abfDF505fFd5587D9E7707dFB47F45AF1f03E275))&order=time.desc&limit=25"
+
+```
+
+Get the last 25 ERC-20 transactions without Ethereum transactions for address 0xFBb1b73C4f0BDa4f67dcA266ce6Ef42f520fBB98:
+
+```
+curl -k -X GET "http://localhost:3000/ethtxs?and=(contract_to.neq.,or(txfrom.eq.0xFBb1b73C4f0BDa4f67dcA266ce6Ef42f520fBB98,txto.eq.0xFBb1b73C4f0BDa4f67dcA266ce6Ef42f520fBB98))&order=time.desc&limit=25"
+
+```
+
+Get last 25 transactions for both ERC-20 and Ethereum for address 0xFBb1b73C4f0BDa4f67dcA266ce6Ef42f520fBB98:
+
+```
+curl -k -X GET "http://localhost:3000/ethtxs?and=(or(txfrom.eq.0xFBb1b73C4f0BDa4f67dcA266ce6Ef42f520fBB98,txto.eq.0xFBb1b73C4f0BDa4f67dcA266ce6Ef42f520fBB98))&order=time.desc&limit=25"
+
+```
+
+# License
+
+Copyright © 2020-2022 ADAMANT Foundation
+Copyright © 2017-2020 ADAMANT TECH LABS LP
+
+This program is free software: you can redistribute it and/or modify it under the terms of the GNU General Public License as published by the Free Software Foundation, either version 3 of the License, or (at your option) any later version.
+This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for more details.
+You should have received a copy of the GNU General Public License along with this program. If not, see http://www.gnu.org/licenses/.
